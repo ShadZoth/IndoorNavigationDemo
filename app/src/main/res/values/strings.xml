@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Indoor Navigation Demo</string>
+    <string name="rssi_changed_toast_text">RSSI changed. Scanning…</string>
+    <string name="update_button_text">Update</string>
+    <string name="save_button_text">Save</string>
+</resources>
