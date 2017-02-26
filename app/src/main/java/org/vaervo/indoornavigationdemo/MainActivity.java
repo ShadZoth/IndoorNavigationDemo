@@ -5,13 +5,11 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.PackageManager;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.SparseArray;
 import android.view.View;
@@ -30,13 +28,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-//TODO: add permission request
 public class MainActivity extends AppCompatActivity {
 
     private static final String RECORDS_FILENAME = "saved_info";
     private WifiManager mWifiManager;
     private TextView mInfoTextView;
-    private List<Record> records; //TODO: In MVC this should be in model
+    private List<Record> records;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,10 +88,41 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateSavedInfo() {
         records = readRecordsFromFile();
-        StringBuilder builder = new StringBuilder();
+        SparseArray<Map<String, List<WifiNetworkInfo>>> mapSparseArray = new SparseArray<>();
         for (Record record : records) {
-            builder.append(record).append("\n");
+            if (mapSparseArray.get(record.getLocation()) == null) {
+                mapSparseArray.put(record.getLocation(),
+                        new HashMap<String, List<WifiNetworkInfo>>());
+            }
+            for (WifiNetworkInfo info : record.getDescription()) {
+                if (mapSparseArray.get(record.getLocation()).get(info.getBSSID()) == null) {
+                    mapSparseArray.get(record.getLocation()).put(info.getBSSID(),
+                            new ArrayList<WifiNetworkInfo>());
+                }
+                mapSparseArray.get(record.getLocation()).get(info.getBSSID()).add(info);
+            }
         }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < mapSparseArray.size(); i++) {
+            builder.append("Networks at ").append(mapSparseArray.keyAt(i));
+            for (List<WifiNetworkInfo> infoList : mapSparseArray.valueAt(i).values()) {
+                builder
+                        .append("\n\t")
+                        .append(infoList.get(0).getSSID())
+                        .append(" (")
+                        .append(infoList.get(0).getBSSID())
+                        .append("): ");
+                int sum = 0;
+                int count = 0;
+                for (WifiNetworkInfo info : infoList) {
+                    builder.append(info.getSignalLevel()).append(" ");
+                    sum += info.getSignalLevel();
+                    count++;
+                }
+                builder.append("=> ").append(sum / count);
+            }
+        }
+
         TextView savedInfoTextView = (TextView) findViewById(R.id.saved_info_text_view);
         if (savedInfoTextView != null) {
             savedInfoTextView.setText(builder);
@@ -156,25 +184,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             fin = getApplicationContext().openFileInput(RECORDS_FILENAME);
             ois = new ObjectInputStream(fin);
-            List<Record> records = (List<Record>) ois.readObject();
-
-            /*SparseArray<List<List<WifiNetworkInfo>>> map = new SparseArray<>();
-            for (Record record: records) {
-                int location = record.getLocation();
-                List<WifiNetworkInfo> description = record.getDescription();
-
-                List<List<WifiNetworkInfo>> lists = map.get(location);
-                if (lists != null) {
-                    lists.add(description);
-                } else {
-                    List<List<WifiNetworkInfo>> list = new ArrayList<>();
-                    list.add(description);
-                    map.put(location, list);
-                }
-            }*/
-
-            return records;
-
+            return (List<Record>) ois.readObject();
         } catch (IOException | ClassNotFoundException e) {
             e.printStackTrace();
             return new ArrayList<>();
