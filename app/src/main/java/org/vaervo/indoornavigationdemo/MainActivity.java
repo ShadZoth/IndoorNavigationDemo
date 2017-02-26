@@ -1,15 +1,21 @@
 package org.vaervo.indoornavigationdemo;
 
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.util.SparseArray;
 import android.view.View;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,17 +26,29 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+//TODO: add permission request
 public class MainActivity extends AppCompatActivity {
 
     private static final String RECORDS_FILENAME = "saved_info";
     private WifiManager mWifiManager;
     private TextView mInfoTextView;
+    private List<Record> records; //TODO: In MVC this should be in model
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.ACCESS_WIFI_STATE,
+                        Manifest.permission.CHANGE_WIFI_STATE,
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_FINE_LOCATION},
+                0);
+
         setContentView(R.layout.activity_main);
         mWifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
         mInfoTextView = (TextView)findViewById(R.id.info_text_view);
@@ -72,16 +90,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateSavedInfo() {
-        List<WifiNetworkInfo> records = readRecordsFromFile();
-        if (records != null) {
-            StringBuilder builder = new StringBuilder();
-            for (WifiNetworkInfo wifiNetworkInfo : records) {
-                builder.append(wifiNetworkInfo).append("\n");
-            }
-            TextView savedInfoTextView = (TextView) findViewById(R.id.saved_info_text_view);
-            if (savedInfoTextView != null) {
-                savedInfoTextView.setText(builder);
-            }
+        records = readRecordsFromFile();
+        StringBuilder builder = new StringBuilder();
+        for (Record record : records) {
+            builder.append(record).append("\n");
+        }
+        TextView savedInfoTextView = (TextView) findViewById(R.id.saved_info_text_view);
+        if (savedInfoTextView != null) {
+            savedInfoTextView.setText(builder);
         }
     }
 
@@ -93,11 +109,17 @@ public class MainActivity extends AppCompatActivity {
                 networkInfoList.add(new WifiNetworkInfo(result));
             }
         });
-        writeRecordsToFile(networkInfoList);
+        int location = 0;
+        EditText locationEditText = (EditText) findViewById(R.id.location_edit_text);
+        if (locationEditText != null) {
+            location = Integer.parseInt(locationEditText.getText().toString());
+        }
+        records.add(new Record(location, networkInfoList));
+        writeRecordsToFile();
         updateSavedInfo();
     }
 
-    private boolean writeRecordsToFile(List<WifiNetworkInfo> records) {
+    private boolean writeRecordsToFile() {
         FileOutputStream fos = null;
         ObjectOutputStream oos = null;
         try {
@@ -127,17 +149,35 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @SuppressWarnings("unchecked")
-    @Nullable
-    private List<WifiNetworkInfo> readRecordsFromFile() {
+    @NonNull
+    private List<Record> readRecordsFromFile() {
         FileInputStream fin = null;
         ObjectInputStream ois = null;
         try {
             fin = getApplicationContext().openFileInput(RECORDS_FILENAME);
             ois = new ObjectInputStream(fin);
-            return (List<WifiNetworkInfo>) ois.readObject();
+            List<Record> records = (List<Record>) ois.readObject();
+
+            /*SparseArray<List<List<WifiNetworkInfo>>> map = new SparseArray<>();
+            for (Record record: records) {
+                int location = record.getLocation();
+                List<WifiNetworkInfo> description = record.getDescription();
+
+                List<List<WifiNetworkInfo>> lists = map.get(location);
+                if (lists != null) {
+                    lists.add(description);
+                } else {
+                    List<List<WifiNetworkInfo>> list = new ArrayList<>();
+                    list.add(description);
+                    map.put(location, list);
+                }
+            }*/
+
+            return records;
+
         } catch (IOException | ClassNotFoundException e) {
             e.printStackTrace();
-            return null;
+            return new ArrayList<>();
         } finally {
             if (ois != null) {
                 try {
