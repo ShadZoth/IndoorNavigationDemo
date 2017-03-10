@@ -11,11 +11,15 @@ import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
 import android.util.SparseArray;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import org.apache.commons.math3.fitting.PolynomialCurveFitter;
+import org.apache.commons.math3.fitting.WeightedObservedPoints;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -24,6 +28,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String RECORDS_FILENAME = "saved_info";
     private WifiManager mWifiManager;
     private TextView mInfoTextView;
-    private List<Record> records;
+    private List<Record> mRecords;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -87,9 +92,46 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateSavedInfo() {
-        records = readRecordsFromFile();
+        mRecords = readRecordsFromFile();
+        SparseArray<Map<String, List<WifiNetworkInfo>>> mapSparseArray = transformRecords();
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < mapSparseArray.size(); i++) {
+            if (i != 0) {
+                builder.append("\n");
+            }
+            builder.append("Networks at ").append(mapSparseArray.keyAt(i));
+            for (List<WifiNetworkInfo> infoList : mapSparseArray.valueAt(i).values()) {
+                builder
+                        .append("\n\t")
+                        .append(infoList.get(0).getSSID())
+                        .append(" (")
+                        .append(infoList.get(0).getBSSID())
+                        .append("): ");
+                for (int j = 0, infoListSize = infoList.size(); j < infoListSize; j++) {
+                    WifiNetworkInfo info = infoList.get(j);
+                    if (j != infoListSize - 1) {
+                        builder.append(info.getSignalLevel()).append(" ");
+                    } else {
+                        builder.append("=> ").append(getAverageSignalLevel(infoList));
+                    }
+                }
+            }
+        }
+
+        TextView savedInfoTextView = (TextView) findViewById(R.id.saved_info_text_view);
+        if (savedInfoTextView != null) {
+            savedInfoTextView.setText(builder);
+        }
+    }
+
+    private int getAverageSignalLevel(List<WifiNetworkInfo> infoList) {
+        return infoList.get(infoList.size() - 1).getSignalLevel();
+    }
+
+    @NonNull
+    private SparseArray<Map<String, List<WifiNetworkInfo>>> transformRecords() {
         SparseArray<Map<String, List<WifiNetworkInfo>>> mapSparseArray = new SparseArray<>();
-        for (Record record : records) {
+        for (Record record : mRecords) {
             if (mapSparseArray.get(record.getLocation()) == null) {
                 mapSparseArray.put(record.getLocation(),
                         new HashMap<String, List<WifiNetworkInfo>>());
@@ -102,31 +144,21 @@ public class MainActivity extends AppCompatActivity {
                 mapSparseArray.get(record.getLocation()).get(info.getBSSID()).add(info);
             }
         }
-        StringBuilder builder = new StringBuilder();
         for (int i = 0; i < mapSparseArray.size(); i++) {
-            builder.append("Networks at ").append(mapSparseArray.keyAt(i));
             for (List<WifiNetworkInfo> infoList : mapSparseArray.valueAt(i).values()) {
-                builder
-                        .append("\n\t")
-                        .append(infoList.get(0).getSSID())
-                        .append(" (")
-                        .append(infoList.get(0).getBSSID())
-                        .append("): ");
                 int sum = 0;
                 int count = 0;
                 for (WifiNetworkInfo info : infoList) {
-                    builder.append(info.getSignalLevel()).append(" ");
                     sum += info.getSignalLevel();
                     count++;
                 }
-                builder.append("=> ").append(sum / count);
+                int average = sum / count;
+                infoList.add(new WifiNetworkInfo(infoList.get(0).getSSID() + "_average",
+                        infoList.get(0).getBSSID(),
+                        average));
             }
         }
-
-        TextView savedInfoTextView = (TextView) findViewById(R.id.saved_info_text_view);
-        if (savedInfoTextView != null) {
-            savedInfoTextView.setText(builder);
-        }
+        return mapSparseArray;
     }
 
     private void save() {
@@ -142,7 +174,7 @@ public class MainActivity extends AppCompatActivity {
         if (locationEditText != null) {
             location = Integer.parseInt(locationEditText.getText().toString());
         }
-        records.add(new Record(location, networkInfoList));
+        mRecords.add(new Record(location, networkInfoList));
         writeRecordsToFile();
         updateSavedInfo();
     }
@@ -153,7 +185,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             fos = getApplicationContext().openFileOutput(RECORDS_FILENAME, Context.MODE_PRIVATE);
             oos = new ObjectOutputStream(fos);
-            oos.writeObject(records);
+            oos.writeObject(mRecords);
             return true;
         } catch (IOException e) {
             e.printStackTrace();
@@ -222,7 +254,71 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         consumeAllScanResults(scanResultConsumer);
+        builder.append("Your current position is: ").append(calculateCurrentPosition());
         mInfoTextView.setText(builder.toString());
+    }
+
+    private double calculateCurrentPosition() {
+        SparseArray<Map<String, List<WifiNetworkInfo>>> mapSparseArray = transformRecords();
+        Map<String, WeightedObservedPoints> stringWeightedObservedPointsMap = new HashMap<>();
+        for (int i = 0; i < mapSparseArray.size(); i++) {
+            int location = mapSparseArray.keyAt(i);
+            Map<String, List<WifiNetworkInfo>> stringListMap = mapSparseArray.valueAt(i);
+            for (String bssid : stringListMap.keySet()) {
+                WeightedObservedPoints points = stringWeightedObservedPointsMap.get(bssid);
+                if (points == null) {
+                    points = new WeightedObservedPoints();
+                    stringWeightedObservedPointsMap.put(bssid, points);
+                }
+                points.add(getAverageSignalLevel(stringListMap.get(bssid)), location);
+            }
+        }
+        double[] results = new double[stringWeightedObservedPointsMap.size()];
+        int i = 0;
+        for (String bssid : stringWeightedObservedPointsMap.keySet()) {
+            PolynomialCurveFitter fitter = PolynomialCurveFitter.create(2);
+            double[] coeffs = fitter.fit(stringWeightedObservedPointsMap.get(bssid).toList());
+            results[i] = calculateCurrentPosition(bssid, coeffs);
+            i++;
+        }
+        Log.d("REG", Arrays.toString(results));
+        double min = min(results);
+        double max = max(results);
+        double sum = 0;
+        for (double result : results) {
+            if (result != max && result != min) {
+                sum += result;
+            }
+        }
+        return sum / (results.length - 2);
+    }
+
+    private double max(double[] doubles) {
+        double res = doubles[0];
+        for (double aDouble : doubles) {
+            if (aDouble > res) {
+                res = aDouble;
+            }
+        }
+        return res;
+    }
+
+    private double min(double[] doubles) {
+        double res = doubles[0];
+        for (double aDouble : doubles) {
+            if (aDouble < res) {
+                res = aDouble;
+            }
+        }
+        return res;
+    }
+
+    private double calculateCurrentPosition(String bssid, double[] coeffs) {
+        ValueFinder valueFinder = new ValueFinder(bssid);
+        consumeAllScanResults(valueFinder);
+        return valueFinder.getValue() * valueFinder.getValue() * coeffs[2]
+                + valueFinder.getValue() * coeffs[1]
+                + coeffs[0];
     }
 
     private void consumeAllScanResults(ScanResultConsumer scanResultConsumer) {
@@ -247,5 +343,25 @@ public class MainActivity extends AppCompatActivity {
 
     private interface ScanResultConsumer {
         void consume(ScanResult result);
+    }
+
+    private class ValueFinder implements ScanResultConsumer {
+        private final String mBSSID;
+        private int mValue;
+
+        ValueFinder(String bssid) {
+            this.mBSSID = bssid;
+        }
+
+        @Override
+        public void consume(ScanResult result) {
+            if (result.BSSID.equals(mBSSID)) {
+                mValue = result.level;
+            }
+        }
+
+        int getValue() {
+            return mValue;
+        }
     }
 }

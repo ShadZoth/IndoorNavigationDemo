@@ -15,6 +15,12 @@ class WifiNetworkInfo implements Serializable {
         mSignalLevel = result.level;
     }
 
+    WifiNetworkInfo(String SSID, String BSSID, int signalLevel) {
+        mSSID = SSID;
+        mBSSID = BSSID;
+        mSignalLevel = signalLevel;
+    }
+
     String getSSID() {
         return mSSID;
     }
