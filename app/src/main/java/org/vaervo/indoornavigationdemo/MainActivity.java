@@ -14,7 +14,6 @@ import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.util.SparseArray;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -39,6 +38,8 @@ public class MainActivity extends AppCompatActivity {
     private WifiManager mWifiManager;
     private TextView mInfoTextView;
     private List<Record> mRecords;
+    private HallView mHallView;
+    private TextView mLocationTextView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         mWifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
         mInfoTextView = (TextView)findViewById(R.id.info_text_view);
+        mLocationTextView = (TextView) findViewById(R.id.location_text_view);
         View.OnClickListener onClickListener = new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -83,6 +85,13 @@ public class MainActivity extends AppCompatActivity {
                 updateScanResults();
             }
         }, new IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION));
+        mHallView = (HallView) findViewById(R.id.hall_view);
+        mHallView.setOnHighlightedCoordChangedListener(new HallView.OnHighlightedCoordChangedListener() {
+            @Override
+            public void onHighlightedCoordChanged() {
+                mLocationTextView.setText(String.valueOf(mHallView.getHighlightedCoord()));
+            }
+        });
     }
 
     @Override
@@ -170,9 +179,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         int location = 0;
-        EditText locationEditText = (EditText) findViewById(R.id.location_edit_text);
-        if (locationEditText != null) {
-            location = Integer.parseInt(locationEditText.getText().toString());
+        if (mLocationTextView != null) {
+            location = Integer.parseInt(mLocationTextView.getText().toString());
         }
         mRecords.add(new Record(location, networkInfoList));
         writeRecordsToFile();
@@ -254,8 +262,10 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         consumeAllScanResults(scanResultConsumer);
-        builder.append("Your current position is: ").append(calculateCurrentPosition());
+        double currentPosition = calculateCurrentPosition();
+        builder.append("Your current position is: ").append(currentPosition);
         mInfoTextView.setText(builder.toString());
+        mHallView.setCurrentCoord(currentPosition);
     }
 
     private double calculateCurrentPosition() {
@@ -294,23 +304,29 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private double max(double[] doubles) {
-        double res = doubles[0];
-        for (double aDouble : doubles) {
-            if (aDouble > res) {
-                res = aDouble;
+        if (doubles.length > 0) {
+            double res = doubles[0];
+            for (double aDouble : doubles) {
+                if (aDouble > res) {
+                    res = aDouble;
+                }
             }
+            return res;
         }
-        return res;
+        return 0;
     }
 
     private double min(double[] doubles) {
-        double res = doubles[0];
-        for (double aDouble : doubles) {
-            if (aDouble < res) {
-                res = aDouble;
+        if (doubles.length > 0) {
+            double res = doubles[0];
+            for (double aDouble : doubles) {
+                if (aDouble < res) {
+                    res = aDouble;
+                }
             }
+            return res;
         }
-        return res;
+        return 0;
     }
 
     private double calculateCurrentPosition(String bssid, double[] coeffs) {
